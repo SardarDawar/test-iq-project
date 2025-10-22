@@ -1,0 +1,256 @@
+// This is your Prisma schema file
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User Model
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  password      String
+  role          UserRole  @default(USER)
+  bio           String?
+  industry      String?
+  jobRole       String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  assessments   Assessment[]
+  results       Result[]
+  badges        UserBadge[]
+  progress      UserProgress?
+
+  @@index([email])
+}
+
+enum UserRole {
+  USER
+  ADMIN
+  CLIENT_ADMIN
+}
+
+// Tenant Model (Multi-tenancy)
+model Tenant {
+  id            String    @id @default(cuid())
+  name          String
+  slug          String    @unique
+  logo          String?
+  theme         Json?
+  welcomeMessage String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  questions     Question[]
+  assessments   Assessment[]
+
+  @@index([slug])
+}
+
+// Question Model
+model Question {
+  id            String       @id @default(cuid())
+  tenantId      String?
+  category      QuestionCategory
+  type          QuestionType
+  difficulty    Int          @default(1) // 1-5
+  text          String
+  options       Json?        // For multiple choice
+  correctAnswer Json?        // Answer key
+  imageUrl      String?
+  explanation   String?
+  metadata      Json?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  tenant        Tenant?      @relation(fields: [tenantId], references: [id])
+  answers       Answer[]
+
+  @@index([category])
+  @@index([tenantId])
+}
+
+enum QuestionCategory {
+  IQ
+  EQ
+  SQ
+  LEADERSHIP
+}
+
+enum QuestionType {
+  MULTIPLE_CHOICE
+  SCENARIO
+  REFLECTION
+  PATTERN_RECOGNITION
+  VISUAL_REASONING
+  EMOTIONAL_RECOGNITION
+}
+
+// Assessment Model
+model Assessment {
+  id            String          @id @default(cuid())
+  userId        String
+  tenantId      String?
+  mode          AssessmentMode  @default(DEFAULT)
+  customContext Json?           // User bio/context for AI reframing
+  status        AssessmentStatus @default(IN_PROGRESS)
+  startedAt     DateTime        @default(now())
+  completedAt   DateTime?
+
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant        Tenant?         @relation(fields: [tenantId], references: [id])
+  answers       Answer[]
+  result        Result?
+
+  @@index([userId])
+  @@index([status])
+}
+
+enum AssessmentMode {
+  DEFAULT
+  CUSTOM
+  LEADERSHIP
+}
+
+enum AssessmentStatus {
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+}
+
+// Answer Model
+model Answer {
+  id            String      @id @default(cuid())
+  assessmentId  String
+  questionId    String
+  answer        Json
+  isCorrect     Boolean?
+  timeSpent     Int?        // in seconds
+  createdAt     DateTime    @default(now())
+
+  assessment    Assessment  @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  question      Question    @relation(fields: [questionId], references: [id])
+
+  @@index([assessmentId])
+  @@index([questionId])
+}
+
+// Result Model
+model Result {
+  id            String      @id @default(cuid())
+  userId        String
+  assessmentId  String      @unique
+
+  // Scores
+  iqScore       Float?
+  iqPercentile  Float?
+  eqScore       Float?
+  sqScore       Float?
+  lpiScore      Float?      // Leadership Potential Index
+
+  // Domain Scores
+  domainScores  Json        // Detailed breakdown
+
+  // Profile
+  reasoningType String?     // Analytical, Creative, Practical
+  leadershipStyle String?   // Transformational, Empathic, etc.
+
+  // Insights
+  insights      Json        // AI-generated insights
+  strengths     Json
+  improvements  Json
+
+  // Behavioral Metrics
+  behaviorMetrics Json
+
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assessment    Assessment  @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  microlearning MicrolearningPlan?
+
+  @@index([userId])
+}
+
+// Badge System
+model Badge {
+  id            String      @id @default(cuid())
+  name          String
+  description   String
+  icon          String
+  category      QuestionCategory
+  level         Int         @default(1)
+
+  users         UserBadge[]
+
+  @@unique([name, level])
+}
+
+model UserBadge {
+  id            String      @id @default(cuid())
+  userId        String
+  badgeId       String
+  earnedAt      DateTime    @default(now())
+
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  badge         Badge       @relation(fields: [badgeId], references: [id])
+
+  @@unique([userId, badgeId])
+  @@index([userId])
+}
+
+// User Progress
+model UserProgress {
+  id            String      @id @default(cuid())
+  userId        String      @unique
+  xp            Int         @default(0)
+  level         Int         @default(1)
+  streak        Int         @default(0)
+  lastActive    DateTime    @default(now())
+
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// Microlearning
+model MicrolearningPlan {
+  id            String      @id @default(cuid())
+  resultId      String      @unique
+
+  insightCards  Json        // 3-5 insight cards
+  dailyPlan     Json        // 5-day plan
+  progress      Json        @default("{}")
+
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  result        Result      @relation(fields: [resultId], references: [id], onDelete: Cascade)
+
+  @@index([resultId])
+}
+
+// Analytics (for Admin Portal)
+model Analytics {
+  id            String      @id @default(cuid())
+  tenantId      String?
+
+  metric        String
+  value         Float
+  metadata      Json?
+
+  recordedAt    DateTime    @default(now())
+
+  @@index([tenantId])
+  @@index([metric])
+  @@index([recordedAt])
+}
